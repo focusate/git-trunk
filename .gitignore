@@ -1,0 +1,9 @@
+*.pyc
+*~
+
+# Distribution / packaging
+.eggs/
+*.egg-info/
+build/
+dist/
+MANIFEST
