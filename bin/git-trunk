@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+import abc
+import argparse
+from distutils.util import strtobool
+from git_trunk.git_trunk import (
+    GitTrunkConfig,
+    GitTrunkInit,
+    GitTrunkStart,
+    GitTrunkFinish,
+    GitTrunkRelease,
+    GitTrunkRefresh,
+    GitTrunkSquash,
+    DEFAULT_LOG_LEVEL
+)
+from git_trunk import __version__
+
+
+_subparsers_map = {}
+
+
+def underscore(s: str):
+    return s.replace('-', '_')
+
+
+def dashify(s: str):
+    return s.replace('_', '-')
+
+
+def strtorealbool(val):
+    """Wrap strtobool, to return bool value instead of 1/0."""
+    return bool(strtobool(val))
+
+
+def add_bool_arg(parser, dest, default=None, help_=''):
+    """Add mutually exclusive boolean argument.
+
+    One flag specified True value, the other False. Both flags, can't
+    be used at the same time. If flags are not set, will use specified
+    default value instead.
+    """
+    name = dashify(dest)
+    group = parser.add_mutually_exclusive_group(required=False)
+    group.add_argument(
+        '--%s' % name, dest=dest, action='store_true', help=help_)
+    group.add_argument(
+        '--no-%s' % name, dest=dest, action='store_false')
+    parser.set_defaults(**{dest: default})
+
+
+class BaseArgAdder(abc.ABC):
+    """Base class to add specific argument type to parser."""
+
+    def __init__(self, parser, arg_name: str, description: str = ''):
+        """Initialize arg adder."""
+        self._parser = parser
+        self._name = arg_name
+        self._description = description
+
+    @property
+    def parser(self):
+        """Return parser attribute."""
+        return self._parser
+
+    @property
+    def name(self):
+        """Return argument name attribute."""
+        return self._name
+
+    @property
+    def dashified_name(self):
+        """Return argument name in dash form."""
+        return dashify(self.name)
+
+    @property
+    def description(self):
+        """Return argument help description attribute."""
+        return self._description
+
+    @abc.abstractmethod
+    def add(self) -> None:
+        """Override to implement how argument is to be added."""
+        ...
+
+
+class ArgAdderStr(BaseArgAdder):
+    """Class to add str type argument on parser."""
+
+    def __init__(
+        self,
+        parser,
+        arg_name: str,
+        description: str = '',
+            optional: bool = True):
+        """Override to add optional arg."""
+        super().__init__(parser, arg_name, description=description)
+        self._optional = optional
+
+    def add(self) -> None:
+        """Override to implement string type argument add."""
+        name = self.dashified_name
+        if self._optional:
+            name = '--%s' % name
+        self.parser.add_argument(
+            name,
+            help=self.description
+        )
+
+
+class ArgAdderBool(BaseArgAdder):
+    """Class to add bool type argument on parser."""
+
+    def add(self) -> None:
+        """Override to implement bool type argument add."""
+        add_bool_arg(
+            self.parser,
+            self.name,
+            help_=self.description)
+
+
+class BaseSubparserTrunk(abc.ABC):
+    """Base class to manage trunk subparser for main ArgumentParser."""
+
+    git_trunk_class = None  # subclass must specify it.
+    formatter_class = argparse.RawTextHelpFormatter
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize trunk subparser."""
+        kwargs = {'description': self.description}
+        if self.formatter_class:
+            kwargs['formatter_class'] = self.formatter_class
+        self.parser = subparsers.add_parser(self.name, **kwargs)
+        self.parser.add_argument(
+            '--repo-path',
+            help="Git repository path to use. If not set, will use current"
+            " working directory.")
+        self.parser.add_argument('--log-level', default=DEFAULT_LOG_LEVEL)
+        self.parser.add_argument('--debug', action='store_true')
+        # Map for easier reuse.
+        _subparsers_map[self.name] = self
+
+    @property
+    def name(self) -> str:
+        """Return command name for git_trunk_class.
+
+        Override to set custom name.
+        """
+        return self.git_trunk_class.section
+
+    @property
+    def description(self):
+        """Return description for subparser."""
+        return self.git_trunk_class.run.__doc__
+
+    def prepare_args(self, args):
+        """Prepare command args for execution.
+
+        Args are converted to kwargs that can be used for GitTrunk
+        classes initialization and running.
+
+        Override to implement additional args preparation.
+        """
+        init_kwargs = {
+            'repo_path': args.repo_path,
+            'log_level': args.log_level,
+        }
+        run_kwargs = {}
+        return init_kwargs, run_kwargs
+
+    def init_trunk_class(self, init_kwargs, args):
+        """Initialize trunk class for executing its run method."""
+        return self.git_trunk_class(**init_kwargs)
+
+    def execute(self, args):
+        """Execute command that runs specific GitTrunk object."""
+        init_kwargs, run_kwargs = self.prepare_args(args)
+        try:
+            trunk_class = self.init_trunk_class(init_kwargs, args)
+            trunk_class.run(**run_kwargs)
+        except ValueError as e:
+            if args.debug:
+                raise
+            # No need to pollute output with traceback when running in
+            # non debug mode.
+            else:
+                print(e)
+
+
+class SubparserTrunkInit(BaseSubparserTrunk):
+    """Init command subparser."""
+
+    git_trunk_class = GitTrunkInit
+    arg_adders_map = {
+        str: ArgAdderStr,
+        bool: ArgAdderBool,
+    }
+    convert_func_map = {
+        str: None,
+        bool: strtorealbool,
+    }
+    config_struct = GitTrunkConfig.get_config_struct()
+
+    def _get_option_type(self, option_vals):
+        return type(option_vals['default'])
+
+    def _add_config_struct_args(self):
+        for section, section_struct in self.config_struct.items():
+            # Using group as parser, to make it more distinguishable
+            # where each argument belongs.
+            group = self.parser.add_argument_group(section)
+            for option_vals in section_struct.values():
+                option_type = self._get_option_type(option_vals)
+                ArgAdder = self.arg_adders_map[option_type]
+                ArgAdder(
+                    group,
+                    option_vals['name'],
+                    description=option_vals['description']
+                ).add()
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize trunk subparser."""
+        super().__init__(subparsers)
+        self.parser.add_argument(
+            '--no-confirm',
+            action="store_true",
+            help="Won't ask to confirm input during config init.")
+        self._add_config_struct_args()
+
+    @property
+    def name(self) -> str:
+        """Override to specify init command name."""
+        # GitTrunkInit does not have section name specified, so we add
+        # one here manually.
+        return 'init'
+
+    def prepare_args(self, args):
+        """Override to prepare GitTrunkInit specific args."""
+        init_kwargs, run_kwargs = super().prepare_args(args)
+        for section_struct in self.config_struct.values():
+            for option_vals in section_struct.values():
+                name = option_vals['name']
+                init_kwargs[name] = getattr(args, name)
+        return init_kwargs, run_kwargs
+
+    def _confirm_input(self, trunk_init):
+        def handle_input(key, label, section, convert_func=None):
+            val = init_cfg[section][key]
+            msg = '{label}: {val!r}? '.format(label=label, val=val)
+            inp = input(msg)
+            if inp:
+                if convert_func:
+                    inp = convert_func(inp)
+                init_cfg[section][key] = inp
+
+        init_cfg = trunk_init._init_cfg
+        for section, section_struct in self.config_struct.items():
+            for option, option_vals in section_struct.items():
+                option_type = self._get_option_type(option_vals)
+                convert_func = self.convert_func_map[option_type]
+                handle_input(
+                    option,
+                    option_vals['label'],
+                    section,
+                    convert_func=convert_func)
+
+    def init_trunk_class(self, init_kwargs, args):
+        """Override to implement input confirmation."""
+        trunk_init = super().init_trunk_class(init_kwargs, args)
+        if not args.no_confirm:
+            print(
+                "Enter new value to set it, leave empty to keep current "
+                "value.")
+            self._confirm_input(trunk_init)
+        return trunk_init
+
+
+class SubparserTrunkStart(BaseSubparserTrunk):
+    """Start command subparser."""
+
+    git_trunk_class = GitTrunkStart
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize start subparser."""
+        super().__init__(subparsers)
+        self.parser.add_argument(
+            '--name', help="Custom name of the branch.")
+        self.parser.add_argument(
+            '--pattern',
+            help="Regex pattern to filter existing not used remote branches."
+            "If custom name is not specified, will use this pattern on "
+            "branch names.")
+        self.parser.add_argument(
+            '--no-set-upstream',
+            action='store_true',
+            help="Whether to not set upstream after creating branch.")
+
+    def prepare_args(self, args):
+        """Override to prepare GitTrunkStart specific args."""
+        init_kwargs, run_kwargs = super().prepare_args(args)
+        run_kwargs.update({
+            'name': args.name,
+            'pattern': args.pattern,
+            'set_upstream': not args.no_set_upstream,
+        })
+        return init_kwargs, run_kwargs
+
+
+class SubparserTrunkFinish(BaseSubparserTrunk):
+    """Finish command subparser."""
+
+    git_trunk_class = GitTrunkFinish
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize finish subparser."""
+        super().__init__(subparsers)
+
+
+class SubparserTrunkRelease(BaseSubparserTrunk):
+    """Release command subparser."""
+
+    git_trunk_class = GitTrunkRelease
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize release subparser."""
+        super().__init__(subparsers)
+        self.parser.add_argument(
+            '--version', help="Custom version to use for tag. Mandatory "
+            "for generic versioning. Optional for semver. If not set for "
+            "semver, version will be bumped automatically.")
+        self.parser.add_argument(
+            '--ref',
+            help="Reference to release on (commit hash, branch or some other"
+            " reference).")
+        self.parser.add_argument(
+            '--force',
+            action='store_true',
+            help="Allows to create tag for reference that older or the same "
+            "to current latest tag.")
+        self.parser.add_argument(
+            '--part',
+            default='minor',
+            help="Only used in semver versioning. Version part to bump."
+            " Defaults to 'minor'.")
+
+    def prepare_args(self, args):
+        """Override to prepare GitTrunkRelease specific args."""
+        init_kwargs, run_kwargs = super().prepare_args(args)
+        run_kwargs.update({
+            'version': args.version,
+            'ref': args.ref,
+            'force': args.force,
+            'part': args.part,
+        })
+        return init_kwargs, run_kwargs
+
+
+class SubparserTrunkRefresh(BaseSubparserTrunk):
+    """Refresh command subparser."""
+
+    git_trunk_class = GitTrunkRefresh
+
+    @property
+    def name(self) -> str:
+        """Override to specify refresh command name."""
+        return 'refresh'
+
+
+class SubparserTrunkSquash(BaseSubparserTrunk):
+    """Squash command subparser."""
+
+    git_trunk_class = GitTrunkSquash
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize squash subparser."""
+        super().__init__(subparsers)
+        self.parser.add_argument(
+            '--count',
+            type=int,
+            help="Custom number of commits to squash. By default will use "
+            "maximum number of commits that are ahead of trunk branch minus"
+            " one (where other commits will be squashed into).")
+        self.parser.add_argument(
+            '--no-squash-msg',
+            action='store_true',
+            help="Whether to not include squashed commits message")
+        self.parser.add_argument(
+            '--custom-msg',
+            help="Use custom commit message instead."
+        )
+
+    def prepare_args(self, args):
+        """Override to prepare GitTrunkSquash specific args."""
+        init_kwargs, run_kwargs = super().prepare_args(args)
+        run_kwargs.update({
+            'count': args.count,
+            'include_squash_msg': not args.no_squash_msg,
+            'custom_msg': args.custom_msg,
+        })
+        return init_kwargs, run_kwargs
+
+
+def main():
+    """Run specified git-trunk command."""
+
+    parser = argparse.ArgumentParser(description="Git Trunk")
+    subparsers = parser.add_subparsers(
+        dest='command', help="Git Trunk Commands")
+    parser.add_argument(
+        '--version',
+        action='version',
+        version='git-trunk version {version}'.format(version=__version__))
+    SubparserTrunkInit(subparsers)
+    SubparserTrunkStart(subparsers)
+    SubparserTrunkFinish(subparsers)
+    SubparserTrunkRelease(subparsers)
+    SubparserTrunkRefresh(subparsers)
+    SubparserTrunkSquash(subparsers)
+    args = parser.parse_args()
+    dest_subparser = _subparsers_map[args.command]
+    dest_subparser.execute(args)
+
+
+if __name__ == '__main__':
+    main()
