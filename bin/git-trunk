@@ -282,9 +282,9 @@ class SubparserTrunkStart(BaseSubparserTrunk):
         """Initialize start subparser."""
         super().__init__(subparsers)
         self.parser.add_argument(
-            '--name', help="Custom name of the branch.")
+            '-n', '--name', help="Custom name of the branch.")
         self.parser.add_argument(
-            '--pattern',
+            '-p', '--pattern',
             help="Regex pattern to filter existing not used remote branches."
             "If custom name is not specified, will use this pattern on "
             "branch names.")
@@ -323,20 +323,21 @@ class SubparserTrunkRelease(BaseSubparserTrunk):
         """Initialize release subparser."""
         super().__init__(subparsers)
         self.parser.add_argument(
-            '--version', help="Custom version to use for tag. Mandatory "
-            "for generic versioning. Optional for semver. If not set for "
-            "semver, version will be bumped automatically.")
+            '-v', '--version',
+            help="Custom version to use for tag. Mandatory for generic "
+            "versioning. Optional for semver. If not set for semver, "
+            "version will be bumped automatically.")
         self.parser.add_argument(
-            '--ref',
+            '-r', '--ref',
             help="Reference to release on (commit hash, branch or some other"
             " reference).")
         self.parser.add_argument(
-            '--force',
+            '-f', '--force',
             action='store_true',
             help="Allows to create tag for reference that older or the same "
             "to current latest tag.")
         self.parser.add_argument(
-            '--part',
+            '-p', '--part',
             default='minor',
             help="Only used in semver versioning. Version part to bump."
             " Defaults to 'minor'.")
@@ -373,7 +374,7 @@ class SubparserTrunkSquash(BaseSubparserTrunk):
         """Initialize squash subparser."""
         super().__init__(subparsers)
         self.parser.add_argument(
-            '--count',
+            '-c', '--count',
             type=int,
             help="Custom number of commits to squash. By default will use "
             "maximum number of commits that are ahead of trunk branch minus"
@@ -405,7 +406,7 @@ def main():
     subparsers = parser.add_subparsers(
         dest='command', help="Git Trunk Commands")
     parser.add_argument(
-        '--version',
+        '-v', '--version',
         action='version',
         version='git-trunk version {version}'.format(version=__version__))
     SubparserTrunkInit(subparsers)

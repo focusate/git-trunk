@@ -522,7 +522,7 @@ class GitTrunkCommand(BaseGitTrunk):
 
     def git_push(self, remote_name: str, remote_head: str, *args) -> None:
         """Push active branch to remote."""
-        self.git.push(remote_name, remote_head, *args, _log_input=True)
+        self.git.push(*args, remote_name, remote_head, _log_input=True)
 
     def git_delete_remote_branch(
             self, remote_name: str, remote_head: str) -> None:
@@ -545,8 +545,9 @@ class GitTrunkCommand(BaseGitTrunk):
                 self.config.base['trunk_branch'])
             return False
         self.git.pull(
-            tracking_data.remote, tracking_data.head,
             '--rebase',
+            tracking_data.remote,
+            tracking_data.head,
             _log_input=True,
             _log_output=True
         )
@@ -950,7 +951,7 @@ class GitTrunkRelease(GitTrunkCommand):
             _git_cmd(['tag'] + args + ['-m', msg])
 
     def _push_tags(self):
-        self.git.push(self.remote_name, '--tags', _log_input=True)
+        self.git.push('--tags', self.remote_name, _log_input=True)
 
     def check_run(self, **kwargs):
         """Override to check if release can be run."""
