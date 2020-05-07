@@ -44,6 +44,21 @@ class GitTrunkCommon(unittest.TestCase):
         # Get back to master.
         git.checkout('master')
 
+    def _create_dummy_submodule(self, dir_name):
+        """Create new repo with dir and adds it as a submodule."""
+        with chdir_tmp(self.dir_local.name):
+            submodule_git = Repo.init(dir_name).git()
+            # Add file
+            _write_file(
+                os.path.join(dir_name, DUMMY_FILE_NAME), DUMMY_FILE_CONTENT)
+            # commit submodule changes
+            submodule_git.add('.')
+            submodule_git.commit('-m', 'init submodule commit')
+        # Add submodule and commit on parent
+        self.git.submodule(
+            'add', os.path.join(self.dir_local.name, 'init_submodule_dir'))
+        self.git.commit('-m', '[ADD] Submodule')
+
     def _create_dummy_dir_with_content(self, dir_name):
         os.mkdir(dir_name)
         _write_file(

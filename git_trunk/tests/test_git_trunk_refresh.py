@@ -78,3 +78,15 @@ class TestGitTrunkRefresh(common.GitTrunkCommon):
         self.git.add('.')
         self.git.commit('-m', 'new commit blabla')
         self._test_git_refresh('branch1', diff='')
+
+    def test_03_git_refresh(self):
+        """Refresh trunk branch when having changes on submodule."""
+        self._create_dummy_submodule('init_submodule_dir')
+        self._update_dummy_file_in_dir('init_submodule_dir')
+        trunk_refresh = GitTrunkRefresh(
+            repo_path=self.dir_local.name,
+            log_level=common.LOG_LEVEL,
+        )
+        diff = self.git.diff()
+        trunk_refresh.run()
+        self._test_git_refresh('master', diff=diff)
