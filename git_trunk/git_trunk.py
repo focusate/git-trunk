@@ -1034,7 +1034,9 @@ class GitTrunkRefresh(GitTrunkCommand):
             - git stash apply (if needed)
         """
         super().run(**kwargs)
-        if self.git.diff('--stat'):
+        # Using --ignore-submodules to avoid 'No stash entries found.'
+        # due to the fact that submodule dir have changes
+        if self.git.diff('--ignore-submodules'):
             self.git_stash()
             self.commands_invoker.add_command(
                 MethodCommand(self.git_stash_apply))
