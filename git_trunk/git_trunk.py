@@ -843,13 +843,14 @@ class GitTrunkRelease(GitTrunkCommand):
 
     section = RELEASE_SECTION
 
-    def _get_default_tag_message(self, new_tag, latest_tag=None):
+    def _get_default_tag_message(self, new_tag, latest_tag=None, ref=None):
         args = ['--oneline']
         # If he have latest tag, we only add difference between latest
         # tag and trunk branch. If we don't have tag, we simply add all
         # changes, which we assume are not yet released.
         if latest_tag:
-            args.append('%s..%s' % (latest_tag, self.active_branch_name))
+            args.append(
+                '%s..%s' % (latest_tag, ref or self.active_branch_name))
         body = self.git.log(*args)
         return "%s\n\n%s" % (new_tag, body)
 
@@ -937,7 +938,7 @@ class GitTrunkRelease(GitTrunkCommand):
             latest_tag = self.versions_tags_map[latest_ver]
         except KeyError:
             latest_tag = None
-        msg = self._tag_msg_formatter(tag, latest_tag)
+        msg = self._tag_msg_formatter(tag, latest_tag, ref)
         args = ['-a', tag]
         if ref:
             args.append(ref)  # tag on specific reference.
@@ -1000,6 +1001,7 @@ class GitTrunkRelease(GitTrunkCommand):
             **kwargs
         )
         version = self.version_manager.get_version(version, part=part)
+
         self._create_tag(version, ref=ref)
         self.commands_invoker.run()
 
