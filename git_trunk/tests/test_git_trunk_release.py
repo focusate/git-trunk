@@ -177,3 +177,77 @@ class TestGitTrunkRelease(common.GitTrunkCommon):
         self.git.branch('--unset-upstream')
         trunk_release.run(part='final')
         self._test_release('v3.0.0')
+
+    def test_05_git_release(self):
+        """Compare git commit and git tag messages.
+
+        Case 1: Test release message without latest tag with custom ref.
+        Case 2: Test release message with latest tag with custom ref.
+        """
+        self.git_trunk_init._init_cfg[RELEASE_SECTION]['usesemver'] = False
+        self.git_trunk_init.run()
+        trunk_release = GitTrunkRelease(
+            repo_path=self.dir_local.name,
+            log_level=common.LOG_LEVEL
+        )
+        # Case 1
+        self._create_dummy_commit('dummy_dir1')
+        self._create_dummy_commit('dummy_dir2')
+        commit = self.git.rev_list('master', '-1', '--skip=1')
+        git_commit_message = "".join(self.git.log(commit, '--oneline').split())
+        trunk_release.run(version='v1', ref=commit)
+        self._test_release('v1', target=commit)
+        tag_message = ("".join(
+            self.git.tag('v1', '-l', '-n99').split())).replace('v1', '')
+        # Check if commit messages and tag messages are the same
+        self.assertEqual(tag_message, git_commit_message)
+        # Case 2
+        self._create_dummy_commit('dummy_dir3')
+        self._create_dummy_commit('dummy_dir4')
+        self._create_dummy_commit('dummy_dir5')
+        v2_commit = self.git.rev_list('master', '-1', '--skip=1')
+        trunk_release.run(version='v2', ref=v2_commit)
+        self._test_release('v2', target=v2_commit)
+        # Clean tag and commit messages to follow same format
+        git_commit_message = "".join(
+            self.git.log('v1..v2', '--oneline').split())
+        tag_message = ("".join(
+            self.git.tag('v2', '-l', '-n99').split())).replace('v2', '')
+        # Check if commit messages and tag messages are the same
+        self.assertEqual(tag_message, git_commit_message)
+
+    def test_06_git_release(self):
+        """Compare git commit and git tag messages.
+
+        Case 1: Test release message without latest tag with default ref
+        Case 2: Test release message with latest tag with default ref
+        """
+        self.git_trunk_init._init_cfg[RELEASE_SECTION]['usesemver'] = False
+        self.git_trunk_init.run()
+        trunk_release = GitTrunkRelease(
+            repo_path=self.dir_local.name,
+            log_level=common.LOG_LEVEL
+        )
+        # Case 1
+        self._create_dummy_commit('dummy_dir1')
+        self._create_dummy_commit('dummy_dir2')
+        git_commit_message = "".join(
+            self.git.log('master', '--oneline').split())
+        trunk_release.run(version='v1')
+        self._test_release('v1')
+        tag_message = ("".join(
+            self.git.tag('v1', '-l', '-n99').split())).replace('v1', '')
+        # Check if commit messages and tag messages are the same
+        self.assertEqual(tag_message, git_commit_message)
+        # # Case 2
+        self._create_dummy_commit('dummy_dir3')
+        self._create_dummy_commit('dummy_dir4')
+        self._create_dummy_commit('dummy_dir5')
+        git_commit_message = "".join(
+            self.git.log('v1..master', '--oneline').split())
+        trunk_release.run(version='v2')
+        self._test_release('v2')
+        tag_message = ("".join(
+            self.git.tag('v2', '-l', '-n99').split())).replace('v2', '')
+        # Check if commit messages and tag messages are the same
+        self.assertEqual(tag_message, git_commit_message)

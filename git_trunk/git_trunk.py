@@ -843,14 +843,13 @@ class GitTrunkRelease(GitTrunkCommand):
 
     section = RELEASE_SECTION
 
-    def _get_default_tag_message(self, new_tag, latest_tag=None):
-        args = ['--oneline']
+    def _get_default_tag_message(self, new_tag, ref, latest_tag=None):
         # If he have latest tag, we only add difference between latest
         # tag and trunk branch. If we don't have tag, we simply add all
         # changes, which we assume are not yet released.
         if latest_tag:
-            args.append('%s..%s' % (latest_tag, self.active_branch_name))
-        body = self.git.log(*args)
+            ref = '%s..%s' % (latest_tag, ref)
+        body = self.git.log(*['--oneline', ref])
         return "%s\n\n%s" % (new_tag, body)
 
     def __init__(self, *args, tag_msg_formatter=None, **kwargs):
@@ -930,17 +929,15 @@ class GitTrunkRelease(GitTrunkCommand):
         if not has_unreleased_changes(latest_ver):
             raise ValueError("There are no new changes to be released.")
 
-    def _create_tag(self, new_version, ref: Optional[str] = None):
+    def _create_tag(self, new_version: str, ref: str):
         tag = self._attach_prefix_to_version(new_version)
         latest_ver = self.version_manager.get_latest_version()
         try:
             latest_tag = self.versions_tags_map[latest_ver]
         except KeyError:
             latest_tag = None
-        msg = self._tag_msg_formatter(tag, latest_tag)
-        args = ['-a', tag]
-        if ref:
-            args.append(ref)  # tag on specific reference.
+        msg = self._tag_msg_formatter(tag, ref, latest_tag=latest_tag)
+        args = ['-a', tag, ref]  # tag on specific reference.
         if self.config.section['edit_tag_message']:
             args.append('--edit')
         # NOTE. this is fake command, because real one takes '-m' arg,
@@ -989,6 +986,7 @@ class GitTrunkRelease(GitTrunkCommand):
                 'build'
                 'final' - will remove prerelease/build parts.
         """
+        ref = ref or self.active_branch_name
         if self.remote_name:
             self._fetch_tags()
             self.commands_invoker.add_command(MethodCommand(self._push_tags))
@@ -1000,7 +998,7 @@ class GitTrunkRelease(GitTrunkCommand):
             **kwargs
         )
         version = self.version_manager.get_version(version, part=part)
-        self._create_tag(version, ref=ref)
+        self._create_tag(version, ref)
         self.commands_invoker.run()
 
 
