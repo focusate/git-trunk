@@ -1,6 +1,6 @@
 from footil.path import chdir_tmp
 from git_trunk import git_trunk
-from git_trunk.git_trunk import GitTrunkFinish
+from git_trunk.git_trunk import GitTrunkFinish, GitTrunkSquash
 from git.exc import GitCommandError
 from . import common
 
@@ -167,3 +167,28 @@ class TestGitTrunkFinish(common.GitTrunkCommon):
             active_latest_commit, self.git.rev_list('master', '-1'))
         with self.assertRaises(GitCommandError):
             self.assertFalse(self.git.show_ref('--heads', '2.0.0'))
+
+    def test_12_git_finish(self):
+        """Finish branch when require_squash is enabled.
+
+        Case 1: Commits not squashed.
+        Case 2: Commits squashed.
+        """
+        # Case 1.
+        self.git.checkout('branch1')
+        self._create_dummy_commit('new_dir1')
+        self.git.push()
+        trunk_finish = GitTrunkFinish(
+            repo_path=self.dir_local.name,
+            log_level=common.LOG_LEVEL
+        )
+        trunk_finish.config.section['require_squash'] = True
+        with self.assertRaises(ValueError):
+            trunk_finish.run()
+        # Case 2.
+        GitTrunkSquash(
+            repo_path=self.dir_local.name,
+            log_level=common.LOG_LEVEL,
+        ).run()
+        trunk_finish.run()
+        self._test_finish('branch1', 'master', 2)

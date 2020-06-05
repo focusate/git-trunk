@@ -137,6 +137,12 @@ class GitTrunkConfig:
                     label="Fast Forward Flag",
                     description="Whether to use --ff-only or --no-ff flag."
                 ),
+                'requiresquash': cls.get_option_vals(
+                    'require_squash',
+                    default=False,
+                    label="Finish Requires Squash",
+                    description="Whether to require squash before finishing."
+                ),
             },
             RELEASE_SECTION: {
                 'versionprefix': cls.get_option_vals(
@@ -512,6 +518,11 @@ class GitTrunkCommand(BaseGitTrunk):
             self.config.base['trunk_branch'], self.active_branch_name)
         return behind
 
+    @property
+    def max_squash_commits_count(self):
+        """Return maximum commits count that can be squashed."""
+        return self.count_commits_ahead_trunk() - 1
+
     def git_diff(self, ref1, ref2, *args) -> str:
         """Return difference between two refs."""
         return self.git.diff('%s..%s' % (ref1, ref2), *args)
@@ -768,6 +779,11 @@ class GitTrunkFinish(GitTrunkCommand, GitTrunkReleaseHelperMixin):
             raise ValueError(
                 "%s branch has no changes to be finished"
                 " on %s." % (self.active_branch_name, trunk_branch_name))
+        if (self.config.section['require_squash'] and
+                self.max_squash_commits_count):
+            raise ValueError(
+                "%s branch must be squashed first before finishing" %
+                self.active_branch_name)
         return res
 
     def run(self, **kwargs) -> None:
@@ -1062,11 +1078,6 @@ class GitTrunkSquash(GitTrunkCommand):
     """Class to allow squashing active branch N commits."""
 
     section = SQUASH_SECTION
-
-    @property
-    def max_squash_commits_count(self):
-        """Return maximum commits count that can be squashed."""
-        return self.count_commits_ahead_trunk() - 1
 
     @property
     def head_hash(self):

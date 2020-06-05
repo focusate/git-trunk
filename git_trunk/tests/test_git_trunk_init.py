@@ -73,6 +73,7 @@ class TestGitTrunkInit(common.GitTrunkCommon):
                 },
                 FINISH_SECTION: {
                     'ff': True,
+                    'require_squash': False,
                 },
                 RELEASE_SECTION: {
                     'version_prefix': '1',
