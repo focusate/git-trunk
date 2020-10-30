@@ -1,4 +1,5 @@
-from git_trunk.git_trunk import GitTrunkRefresh
+from git_trunk.git_trunk_commands import GitTrunkRefresh
+
 from . import common
 
 
@@ -81,8 +82,9 @@ class TestGitTrunkRefresh(common.GitTrunkCommon):
 
     def test_03_git_refresh(self):
         """Refresh trunk branch when having changes on submodule."""
-        self._create_dummy_submodule('init_submodule_dir')
-        self._update_dummy_file_in_dir('init_submodule_dir')
+        git_sub, dir_local_sub, dir_remote_sub = self._setup_repo(
+            self._build_repo_simple)
+        self._add_submodule(self.git, dir_remote_sub.name, 'submodule_dir')
         trunk_refresh = GitTrunkRefresh(
             repo_path=self.dir_local.name,
             log_level=common.LOG_LEVEL,
@@ -90,3 +92,10 @@ class TestGitTrunkRefresh(common.GitTrunkCommon):
         diff = self.git.diff()
         trunk_refresh.run()
         self._test_git_refresh('master', diff=diff)
+        dir_local_sub.cleanup()
+        dir_remote_sub.cleanup()
+
+
+class TestGitTrunkRefreshSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkRefresh):
+    """Class to test git-trunk refresh command on submodule."""

@@ -1,6 +1,6 @@
 from git.exc import GitCommandError
 
-from git_trunk.git_trunk import GitTrunkStart
+from git_trunk.git_trunk_commands import GitTrunkStart
 from . import common
 
 BRANCH_NAMES = [
@@ -54,7 +54,9 @@ class TestGitTrunkStart(common.GitTrunkCommon):
 
         Case 1: try to create existing branch.
         Case 2: try to create branch when not on trunk.
-        Case 3: try to create branch when regex pattern cant find any
+        Case 3: try to create branch when on detached head (tag).
+        Case 4: try to create branch when on detached head (commit).
+        Case 5: try to create branch when regex pattern cant find any
             branch.
         """
         # Case 1.
@@ -71,6 +73,14 @@ class TestGitTrunkStart(common.GitTrunkCommon):
         with self.assertRaises(ValueError):
             trunk_start.run(name='new_branch')
         # Case 3.
+        self.git.tag('-a', 'v1', '-m', 'tag msg')
+        self.git.checkout('v1')
+        with self.assertRaises(ValueError):
+            trunk_start.run(name='new_branch')
+        # Case 4.
+        self.git.checkout(self.git.rev_parse('branch2'))
+        with self.assertRaises(ValueError):
+            trunk_start.run(name='new_branch')
         self.git.checkout('master')
         with self.assertRaises(ValueError):
             trunk_start.run(pattern='not_existing_branch_pattern')
@@ -126,3 +136,8 @@ class TestGitTrunkStart(common.GitTrunkCommon):
         self.git.checkout('master')
         trunk_start.run(pattern='test5')
         self._test_git_start(trunk_start, 'test5-my')
+
+
+class TestGitTrunkStartSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkStart):
+    """Class to test git-trunk start command on submodule."""

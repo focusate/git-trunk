@@ -35,6 +35,11 @@ To know what arguments are available and what they do for each command, use :cod
 
 Remote used is identified by your current branch tracking branch remote. If your current branch does not have tracking branch, then trunk branch tracking branch is checked. If trunk branch does not have tracking branch set, then it is assumed no remote is used for :code:`git-trunk` workflow.
 
+Submodules
+==========
+
+All possible commands can be used same way as on main superproject repository. Note configuration is still saved on main superproject repository config (submodules do not have git config file), but it is separated by including submodule relative path on sections. E.g. main repository section is named :code:`[trunk]`, where in submodule case, it is named :code:`[trunk "relpath/to/submodule"]`.
+
 init
 ----
 

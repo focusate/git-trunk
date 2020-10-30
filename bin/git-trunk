@@ -2,15 +2,16 @@
 import abc
 import argparse
 from distutils.util import strtobool
-from git_trunk.git_trunk import (
-    GitTrunkConfig,
+
+from git_trunk.git_trunk_config import GitTrunkConfig
+from git_trunk.git_trunk_base import DEFAULT_LOG_LEVEL
+from git_trunk.git_trunk_commands import (
     GitTrunkInit,
     GitTrunkStart,
     GitTrunkFinish,
     GitTrunkRelease,
     GitTrunkRefresh,
     GitTrunkSquash,
-    DEFAULT_LOG_LEVEL
 )
 from git_trunk import __version__
 

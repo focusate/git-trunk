@@ -1,6 +1,6 @@
 from footil.path import chdir_tmp
-from git_trunk import git_trunk
-from git_trunk.git_trunk import GitTrunkFinish, GitTrunkSquash
+from git_trunk import git_trunk_config as gt_config
+from git_trunk.git_trunk_commands import GitTrunkFinish, GitTrunkSquash
 from git.exc import GitCommandError
 from . import common
 
@@ -40,19 +40,17 @@ class TestGitTrunkFinish(common.GitTrunkCommon):
             except GitCommandError:
                 self.fail("Trunk branch must exist remotely.")
 
-    def test_01_git_finish(self):
+    def test_01_git_finish(self, base_section=gt_config.BASE_SECTION):
         """Remove trunkbranch option from section."""
-        with self.git_trunk_init.repo.config_writer() as cw:
-            cw.remove_option(
-                git_trunk.BASE_SECTION, 'trunkbranch')
+        with self.git_trunk_init._config._config_writer() as cw:
+            cw.remove_option(base_section, 'trunkbranch')
         with self.assertRaises(ValueError):
             GitTrunkFinish(repo_path=self.dir_local.name).run()
 
-    def test_02_git_finish(self):
+    def test_02_git_finish(self, base_section=gt_config.BASE_SECTION):
         """Remove trunk section from git config."""
-        with self.git_trunk_init.repo.config_writer() as cw:
-            cw.remove_section(
-                git_trunk.BASE_SECTION)
+        with self.git_trunk_init._config._config_writer() as cw:
+            cw.remove_section(base_section)
         with self.assertRaises(ValueError):
             GitTrunkFinish(repo_path=self.dir_local.name).run()
 
@@ -155,7 +153,7 @@ class TestGitTrunkFinish(common.GitTrunkCommon):
         # Check if release branch was deleted.
         with self.assertRaises(GitCommandError):
             self.git.show_ref('--heads', 'release/1.0.0')
-        trunk_finish.config.sections[git_trunk.RELEASE_SECTION][
+        trunk_finish.config.sections[gt_config.RELEASE_SECTION][
             'branch_prefix'] = ''
         self.git.checkout('-b', '2.0.0')
         self._create_dummy_commit('new_dir2')
@@ -192,3 +190,20 @@ class TestGitTrunkFinish(common.GitTrunkCommon):
         ).run()
         trunk_finish.run()
         self._test_finish('branch1', 'master', 2)
+
+
+class TestGitTrunkFinishSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkFinish):
+    """Class to test git-trunk finish command on submodule."""
+
+    def test_01_git_finish(self, base_section=gt_config.BASE_SECTION):
+        """Remove trunkbranch option from submodule section."""
+        base_section = self.git_trunk_init._config._to_git_section(
+            base_section, common.PATH_SUBMODULE)
+        super().test_01_git_finish(base_section=base_section)
+
+    def test_02_git_finish(self, base_section=gt_config.BASE_SECTION):
+        """Remove trunk section from submodule git config."""
+        base_section = self.git_trunk_init._config._to_git_section(
+            base_section, common.PATH_SUBMODULE)
+        super().test_02_git_finish(base_section=base_section)

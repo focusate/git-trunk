@@ -1,4 +1,6 @@
-from git_trunk.git_trunk import GitTrunkRelease, RELEASE_SECTION
+from git_trunk.git_trunk_config import RELEASE_SECTION
+from git_trunk.git_trunk_commands import GitTrunkRelease
+
 from . import common
 
 
@@ -251,3 +253,8 @@ class TestGitTrunkRelease(common.GitTrunkCommon):
             self.git.tag('v2', '-l', '-n99').split())).replace('v2', '')
         # Check if commit messages and tag messages are the same
         self.assertEqual(tag_message, git_commit_message)
+
+
+class TestGitTrunkReleaseSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkRelease):
+    """Class to test git-trunk release command on submodule."""

@@ -1,6 +1,6 @@
 """Module to manage version validation and bumping."""
 import abc
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union, Callable
 import semver
 import natsort
 
@@ -14,7 +14,7 @@ class BaseVersion(abc.ABC):
 
     def __init__(
         self,
-        versions: Union[Iterable, callable],
+        versions: Union[Iterable, Callable],
             empty_version: Optional[str] = EMPTY_VERSION) -> None:
         """Initialize base version attributes."""
         self._versions = versions
@@ -55,7 +55,7 @@ class BaseVersion(abc.ABC):
             raise ValueError("%s version already exists" % version)
         return True
 
-    def get_version(self, version: Optional['str'] = None, **kwargs) -> str:
+    def get_version(self, version: Optional[str] = None, **kwargs) -> str:
         """Generate new version or use passed one.
 
         Version is then checked by calling `check_version` to make sure
@@ -63,8 +63,8 @@ class BaseVersion(abc.ABC):
         """
         if not version:
             version = self.generate_version(**kwargs)
-        self.check_version(version)
-        return version
+        self.check_version(version)  # type: ignore
+        return version  # type: ignore
 
 
 class GenericVersion(BaseVersion):
@@ -107,7 +107,7 @@ class SemverVersion(BaseVersion):
                 pass  # ignoring not semver valid versions.
         return max_ver
 
-    def generate_version(self, part='minor') -> Union[None, str]:
+    def generate_version(self, **kwargs) -> Union[None, str]:
         """Override to bump version part.
 
         Args:
@@ -119,6 +119,7 @@ class SemverVersion(BaseVersion):
                 - 'build'
                 - 'final' - will remove prerelease/build parts.
         """
+        part = kwargs.get('part', 'minor')
         bump_method_name = self._get_semver_bump_methods_map()[part]
         latest_ver = self.get_latest_version()
         return getattr(semver, bump_method_name)(latest_ver)

@@ -6,11 +6,12 @@ from footil.path import chdir_tmp
 from git import Repo
 
 
-from git_trunk.git_trunk import GitTrunkInit
+from git_trunk.git_trunk_commands import GitTrunkInit
 
 DUMMY_FILE_NAME = 'dummy_file.txt'
 DUMMY_FILE_CONTENT = 'abc'
 LOG_LEVEL = 'ERROR'
+PATH_SUBMODULE = 'external/submodule'
 
 
 def _write_file(path, content):
@@ -18,8 +19,30 @@ def _write_file(path, content):
         f.write(content)
 
 
+class MockedPath:
+    """Class to mimic tempfile object path."""
+
+    def __init__(self, *paths):
+        """Store path on name attribute, same as tempfile."""
+        self.name = os.path.join(*paths)
+
+
 class GitTrunkCommon(unittest.TestCase):
     """Common class for git_trunk tests."""
+
+    def _add_branch_with_content(self, git, branch, name):
+        git.checkout('-b', branch)
+        self._create_dummy_dir_with_content(name)
+        git.add('.')
+        git.commit('-m', '[ADD] %s' % name)
+        git.checkout('master')
+
+    def _build_repo_simple(self, git, dir_local, dir_remote):
+        git.remote('add', 'origin', dir_remote.name)
+        self._create_dummy_dir_with_content('init_dir')
+        git.add('.')
+        git.commit('-m', 'init commit')
+        git.push('--all', '-u', 'origin')
 
     def _build_repo(self, git, dir_local, dir_remote):
         git.remote('add', 'origin', dir_remote.name)
@@ -27,37 +50,16 @@ class GitTrunkCommon(unittest.TestCase):
         git.add('.')
         git.commit('-m', 'init commit')
         # Create branch1
-        git.checkout('-b', 'branch1')
-        self._create_dummy_dir_with_content('module1')
-        git.add('.')
-        git.commit('-m', '[ADD] module1')
-        # Get back to master.
-        git.checkout('master')
+        self._add_branch_with_content(git, 'branch1', 'module1')
         # Push to remote. Using -u to make sure we track upstream
         # branches.
         git.push('--all', '-u', 'origin')
         # Create branch2 (wont be saved on remote).
-        git.checkout('-b', 'branch2')
-        self._create_dummy_dir_with_content('module2')
-        git.add('.')
-        git.commit('-m', '[ADD] module2')
-        # Get back to master.
-        git.checkout('master')
+        self._add_branch_with_content(git, 'branch2', 'module2')
 
-    def _create_dummy_submodule(self, dir_name):
-        """Create new repo with dir and adds it as a submodule."""
-        with chdir_tmp(self.dir_local.name):
-            submodule_git = Repo.init(dir_name).git()
-            # Add file
-            _write_file(
-                os.path.join(dir_name, DUMMY_FILE_NAME), DUMMY_FILE_CONTENT)
-            # commit submodule changes
-            submodule_git.add('.')
-            submodule_git.commit('-m', 'init submodule commit')
-        # Add submodule and commit on parent
-        self.git.submodule(
-            'add', os.path.join(self.dir_local.name, 'init_submodule_dir'))
-        self.git.commit('-m', '[ADD] Submodule')
+    def _add_submodule(self, git, dir_remote_sub, path):
+        git.submodule('add', dir_remote_sub, path)
+        git.commit('-m', '[ADD] Submodule')
 
     def _create_dummy_dir_with_content(self, dir_name):
         os.mkdir(dir_name)
@@ -91,11 +93,7 @@ class GitTrunkCommon(unittest.TestCase):
             build(git, dir_local, dir_remote)
         return git, dir_local, dir_remote
 
-    def setUp(self):
-        """Set up dummy repository for testing."""
-        super().setUpClass()
-        self.git, self.dir_local, self.dir_remote = self._setup_repo(
-            self._build_repo)
+    def _setup_trunk_init(self):
         self.git_trunk_init = GitTrunkInit(
             trunk_branch='master',
             repo_path=self.dir_local.name,
@@ -104,11 +102,64 @@ class GitTrunkCommon(unittest.TestCase):
             edit_squash_message=False)
         self.git_trunk_init.run()
 
-    def _teardown_repo(self, directory):
-        directory.cleanup()
+    def _setup_trunk(self):
+        self.git, self.dir_local, self.dir_remote = self._setup_repo(
+            self._build_repo)
+        self._setup_trunk_init()
+
+    def setUp(self):
+        """Set up dummy repository for testing."""
+        super().setUpClass()
+        self._setup_trunk()
+
+    def _get_tempdirs_to_cleanup(self):
+        return [
+            self.dir_local,
+            self.dir_remote
+        ]
 
     def tearDown(self):
         """Tear down dummy repositories."""
         super().tearDown()
-        self._teardown_repo(self.dir_local)
-        self._teardown_repo(self.dir_remote)
+        [d.cleanup() for d in self._get_tempdirs_to_cleanup()]
+
+
+class GitTrunkSubmoduleCommon(GitTrunkCommon):
+    """Common class for git_trunk submodule tests."""
+
+    def _setup_trunk(self):
+        """Override to combine main repository with submodule one."""
+        # Repo that will be added as submodule.
+        # NOTE. submodule dir_local will be used as combination from
+        # main repo and submodule path inside it.
+        _, self.dir_local_sub, self.dir_remote = self._setup_repo(
+            self._build_repo)
+        # Repo that will be used as submodule holder.
+        self.git_main, self.dir_local_main, self.dir_remote_main = (
+            self._setup_repo(self._build_repo_simple))
+        # Path used inside main repo when adding submodule.
+        self._add_submodule(
+            self.git_main, self.dir_remote.name, PATH_SUBMODULE)
+        # Set variables as it would look like normal repo used from
+        # GitTrunkCommon.
+        self.dir_local = MockedPath(self.dir_local_main.name, PATH_SUBMODULE)
+        repo_sub = Repo(self.dir_local.name)
+        self.git = repo_sub.git()
+        # Make submodule look like main repo.
+        self.git.fetch('origin')
+        self.git.checkout('branch1')
+        self.git.checkout('master')
+        # Re-add branch2 locally, because it is not on remote (so won't
+        # be pulled).
+        with chdir_tmp(self.dir_local.name):
+            self._add_branch_with_content(self.git, 'branch2', 'module2')
+        self._setup_trunk_init()
+
+    def _get_tempdirs_to_cleanup(self):
+        return [
+            self.dir_remote,
+            self.dir_local_sub,
+            self.dir_local_main,
+            self.dir_remote_main
+
+        ]

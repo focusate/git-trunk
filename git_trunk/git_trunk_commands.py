@@ -1,583 +1,24 @@
 """Git Trunk based workflow helper commands."""
-import os
-import abc
 import re
-import string
 from collections import namedtuple
-from typing import Optional, Union, Any, Iterable, List, Tuple
-from configparser import NoSectionError, NoOptionError
+from typing import Optional, Union
 import natsort
-from footil.log import get_verbose_logger
 from footil.path import chdir_tmp
-from footil.formatting import format_func_input
-from footil.patterns import MethodCommand, DequeInvoker
+from footil.patterns import MethodCommand
 import git  # GitPython
-import subprocess
-import shutil
 
+from . import git_trunk_base as gt_base
+from . import git_trunk_config as gt_config
 from . import version as version_manager
 
-SEP = '"'
-BASE_SECTION = 'trunk'
-START_SECTION = 'start'
-FINISH_SECTION = 'finish'
-RELEASE_SECTION = 'release'
-SQUASH_SECTION = 'squash'
-SECTION_PATTERN = '{section} {sep}%s{sep}'.format(
-    section=BASE_SECTION, sep=SEP)
-
-
 EMPTY_VERSION = '0.0.0'  # default version when are no versions yet
-LOG_INPUT = '_log_input'
-LOG_OUTPUT = '_log_output'
 
-DEFAULT_LOG_LEVEL = 'NOTICE'
-DEFAULT_FETCH_PATTERN = '*'
-
-# Object to store tracking data for upstream branch, if there is one.
-TrackingBranchData = namedtuple('TrackingBranchData', 'remote head')
 MethodData = namedtuple('MethodData', 'method args kwargs')
 # Set defaults for args and kwargs.
 MethodData.__new__.__defaults__ = ((), {})
 
 
-def _get_repo_path(repo_path: Optional[str] = None) -> str:
-    return repo_path or os.getcwd()
-
-
-def _format_stderr(stderr) -> str:
-    return stderr.replace('stderr: ', '')
-
-
-def _git_cmd(args):
-    """Call git via subprocess directly.
-
-    Used when gitPython can't handle some cases correctly (like open
-    terminal editors such as nano).
-    """
-    return subprocess.run([shutil.which('git')] + args)
-
-
-# TODO: maybe worth to reuse on footil?
-def multi_filter(filters: Iterable[callable], items: Iterable) -> list:
-    """Combine multiple condition functions to check all of them.
-
-    All filter conditions must be satisfied for item to be included.
-
-    Args:
-        filters: condition functions to be combined.
-        items: items to be filtered.
-
-    Returns:
-        list
-
-    """
-    def check_filters(item: Any):
-        return all(f(item) for f in filters)
-
-    return [i for i in items if check_filters(i)]
-
-
-class GitTrunkConfig:
-    """Class to manage git-trunk configuration."""
-
-    @staticmethod
-    def _to_git_section(section: str) -> str:
-        if section != BASE_SECTION:
-            return SECTION_PATTERN % section
-        return section
-
-    @classmethod
-    def get_option_vals(
-            self, name, default, forced_type=None, label=None, description=''):
-        """Get option values for config."""
-        def get_label():
-            if label:
-                return label
-            return string.capwords(name.replace('_', ' '))
-
-        return {
-            'name': name,
-            'default': default,
-            'forced_type': forced_type,
-            'label': get_label(),
-            'description': description,
-        }
-
-    @classmethod
-    def get_config_struct(cls):
-        """Get structure for setting and getting config."""
-        return {
-            BASE_SECTION: {
-                'trunkbranch': cls.get_option_vals(
-                    'trunk_branch',
-                    'master',
-                    forced_type=str,
-                    description=(
-                        "Trunk/Mainline branch name. Defaults to 'master'."
-                    )
-                ),
-            },
-            START_SECTION: {
-                'fetchbranchpattern': cls.get_option_vals(
-                    'fetch_branch_pattern',
-                    DEFAULT_FETCH_PATTERN,
-                    forced_type=str,
-                    description=(
-                        "Pattern used when fetching remote branches. "
-                        "Defaults to {p} (fetch all "
-                        "branches)'.".format(p=DEFAULT_FETCH_PATTERN)
-                    )
-                ),
-            },
-            FINISH_SECTION: {
-                'ff': cls.get_option_vals(
-                    'ff',
-                    default=True,
-                    label="Fast Forward Flag",
-                    description="Whether to use --ff-only or --no-ff flag."
-                ),
-                'requiresquash': cls.get_option_vals(
-                    'require_squash',
-                    default=False,
-                    label="Finish Requires Squash",
-                    description="Whether to require squash before finishing."
-                ),
-            },
-            RELEASE_SECTION: {
-                'versionprefix': cls.get_option_vals(
-                    'version_prefix',
-                    '',
-                    forced_type=str,
-                    description="Whether version prefix is to be used."
-                ),
-                'releasebranchprefix': cls.get_option_vals(
-                    'release_branch_prefix',
-                    'release/',
-                    forced_type=str,
-                    description="Release branch prefix. Defaults to 'release/'"
-                ),
-                'usesemver': cls.get_option_vals(
-                    'use_semver',
-                    default=True,
-                    description="Whether semver versioning is to be used."
-                ),
-                'edittagmessage': cls.get_option_vals(
-                    'edit_tag_message',
-                    default=True,
-                    description=(
-                        "Whether editor should be opened for tag message"
-                        " before creating tag for release."
-                    )
-                ),
-            },
-            SQUASH_SECTION: {
-                'editsquashmessage': cls.get_option_vals(
-                    'edit_squash_message',
-                    default=True,
-                    description=(
-                        "Whether to open editor after squashing for"
-                        " customizing message")
-                ),
-                'forcepushsquash': cls.get_option_vals(
-                    'force_push_squash',
-                    default=True,
-                    description=(
-                        "Whether to force push to remote tracking branch"
-                        " after squashing."
-                    )
-                ),
-            }
-        }
-
-    def handle_exception(
-            self, exception: Exception, msg: str, section: str, option: str):
-        """Handle exception when reading git configuration.
-
-        Override if exception must be handled differently.
-        """
-        raise ValueError(msg)
-
-    def get_value(
-        self,
-        cr: git.Repo.config_reader,
-        git_section: str,
-        option: str,
-            vals: dict) -> Any:
-        """Retrieve value from git config.
-
-        Args:
-            cr: config reader object to read git config.
-            git_section: git config section.
-            option: config section option.
-            vals: config structure to handle read git config options.
-        """
-        try:
-            val = cr.get_value(git_section, option)
-            if vals.get('forced_type'):
-                val = vals['forced_type'](val)
-            return val
-        # Re-raise with more meaningful description.
-        except NoSectionError as e:
-            return self.handle_exception(
-                e,
-                "%s section is missing in git configuration" % git_section,
-                git_section,
-                option)
-        except NoOptionError as e:
-            return self.handle_exception(
-                e,
-                "%s option is missing in git configuration %s section" % (
-                    option, git_section),
-                git_section,
-                option,
-            )
-
-    def _get_config_template(self):
-        return {
-            section: {} for section in self.get_config_struct().keys()
-        }
-
-    def read(self) -> dict:
-        """Return git-trunk configuration from git config file."""
-        cfg = self._get_config_template()
-        with self._config_reader() as cr:
-            for section, section_struct in self.get_config_struct().items():
-                # Convert to be more readable.
-                for option, vals in section_struct.items():
-                    git_section = self._to_git_section(section)
-                    cfg[section][vals['name']] = self.get_value(
-                        cr, git_section, option, vals)
-        return cfg
-
-    def write(self, config: dict) -> None:
-        """Write specified config on git config file."""
-        with self._config_writer() as cw:
-            for section, section_cfg in config.items():
-                for option, val in section_cfg.items():
-                    git_section = self._to_git_section(section)
-                    cw.set_value(git_section, option, val)
-
-    def check_config(self, cfg: dict) -> None:
-        """Check if got configuration is correct one.
-
-        Override to implement specific checks.
-        """
-        return True
-
-    def __init__(
-        self,
-        config_reader: git.Repo.config_reader,
-        config_writer: git.Repo.config_writer,
-            section) -> None:
-        """Initialize git trunk configuration."""
-        super().__init__()
-        self._config_reader = config_reader
-        self._config_writer = config_writer
-        self._section = section
-        self._config = None
-
-    @property
-    def sections(self) -> dict:
-        """Use _get_config to get active git-trunk configuration.
-
-        Returns full config.
-        """
-        if self._config is None:
-            cfg = self.read()
-            self.check_config(cfg)
-            self._config = cfg
-        return self._config
-
-    @property
-    def base(self):
-        """Return base cfg part, not related with specific command."""
-        return self.sections[BASE_SECTION]
-
-    @property
-    def section(self) -> dict:
-        """Return rel section config to have shortcut most used cfg."""
-        try:
-            return self.sections[self._section]
-        except KeyError:  # if command has no related section.
-            raise Warning(
-                "This configuration does not have main section specified")
-
-
-class GitTrunkReleaseHelperMixin:
-    """Release management helper mixin for other command classes.
-
-    Used to share common release helper functions for actions like
-    finish, release.
-    """
-
-    def is_release_branch(self, branch_name: str) -> bool:
-        """Check if branch is considered release branch."""
-        prefix = self.config.sections[RELEASE_SECTION]['release_branch_prefix']
-        if prefix:
-            return branch_name.startswith(prefix)
-        return False
-
-
-class BaseGitTrunk(abc.ABC):
-    """Base class for all git-trunk classes."""
-
-    def __init__(
-            self,
-            repo_path: Optional[str] = None,
-            log_level: str = DEFAULT_LOG_LEVEL) -> None:
-        """Initialize git trunk class."""
-        # calling to make sure MRO is handled correctly with multiple
-        # inheritance.
-        super().__init__()
-        self.repo = git.Repo(_get_repo_path(repo_path=repo_path))
-        self.git = self.repo.git()  # git command interface.
-        self.logger = get_verbose_logger(__name__, log_level=log_level, fmt='')
-
-
-class GitTrunkCommand(BaseGitTrunk):
-    """Command class to handle git trunk based workflow.
-
-    Must be inherited by all command classes.
-    """
-
-    section = None
-
-    def _hook_log_git_commands(self):
-        def _call_process(self_inner, method, *args, **kwargs):
-            # Removing output before input, to make sure its not
-            # included in input logging.
-            log_output = LOG_OUTPUT in kwargs and kwargs.pop(LOG_OUTPUT)
-            if LOG_INPUT in kwargs and kwargs.pop(LOG_INPUT):
-                dashified_method = git.cmd.dashify(method)
-                pattern, pattern_args = format_func_input(
-                    dashified_method,
-                    command=True,
-                    prefix='git ',
-                    args=args,
-                    kwargs=kwargs)
-                self.logger.notice(pattern, *pattern_args)
-            output = old_call_process(self_inner, method, *args, **kwargs)
-            if log_output:
-                self.logger.info(output)
-            return output
-        old_call_process = git.cmd.Git._call_process
-        git.cmd.Git._call_process = _call_process
-
-    def __init__(self, *args, **kwargs):
-        """Initialize trunk command class attributes."""
-        super().__init__(*args, **kwargs)
-        self._commands_invoker = DequeInvoker()
-        self._hook_log_git_commands()
-        self._config = GitTrunkConfig(
-            self.repo.config_reader,
-            self.repo.config_writer,
-            self.section
-            )
-
-    def get_branch_obj(self, branch_name: str) -> git.refs.head.Head:
-        """Return branch object using branch name."""
-        try:
-            return self.repo.branches[branch_name]
-        except IndexError:
-            raise ValueError("%s branch was not found" % branch_name)
-
-    def _get_tracking_branch_data(
-        self,
-        tracking_branch: git.refs.remote.RemoteReference) -> Union[
-            TrackingBranchData, bool]:
-        try:
-            return TrackingBranchData(
-                remote=tracking_branch.remote_name,
-                head=tracking_branch.remote_head
-            )
-        # Handle case, when branch does not have tracking_branch, thus
-        # tracking_branch is just None, which of course won't have any
-        # attributes.
-        except AttributeError:
-            return False
-
-    def is_symbolic_ref(
-            self, ref: Union[git.Head, git.RemoteReference]) -> bool:
-        """Check if reference is symbolic or real."""
-        # Symbolic reference points to other reference or real one.
-        # Real one throws exception when trying to get its
-        # reference.
-        try:
-            ref.ref
-            return True
-        except TypeError:  # not pointing to anything, means real.
-            return False
-
-    @property
-    def commands_invoker(self):
-        """Return DequeInvoker object."""
-        return self._commands_invoker
-
-    @property
-    def config(self) -> dict:
-        """Return GitTrunkConfig instance."""
-        return self._config
-
-    @property
-    def active_branch(self) -> git.Head:
-        """Return active branch object."""
-        return self.repo.active_branch
-
-    @property
-    def active_branch_name(self) -> str:
-        """Return active branch name."""
-        return self.active_branch.name
-
-    @property
-    def local_branch_names(self) -> List[str]:
-        """Return current local branch names."""
-        return [
-            branch.name for branch in self.repo.branches if not
-            self.is_symbolic_ref(branch)
-        ]
-
-    @property
-    def remote_branch_heads(self) -> List[str]:
-        """Return current remote branch heads."""
-        remote = self.remote_name
-        # Head is usually equivalent to local branch name.
-        return [
-            ref.remote_head for ref in self.repo.remotes[remote].refs if not
-            self.is_symbolic_ref(ref)
-        ]
-
-    @property
-    def tracking_branch_map(self) -> dict:
-        """Return local branches mapped with their tracking branches."""
-        map_ = {}
-        for branch in self.repo.branches:
-            tracking_data = self._get_tracking_branch_data(
-                branch.tracking_branch()
-            )
-            if tracking_data:
-                map_[branch.name] = tracking_data.head
-            else:
-                map_[branch.name] = None
-        return map_
-
-    @property
-    def active_tracking_branch_data(self) -> Union[TrackingBranchData, bool]:
-        """Return active branch remote name with remote branch name.
-
-        If tracking branch/upstream is not set, will return False
-        instead.
-        """
-        return self._get_tracking_branch_data(
-            self.active_branch.tracking_branch()
-        )
-
-    @property
-    def trunk_tracking_branch_data(self) -> Union[TrackingBranchData, bool]:
-        """Return trunk branch remote name with remote branch name.
-
-        If tracking branch/upstream is not set, will return False
-        instead.
-        """
-        trunk_branch = self.get_branch_obj(
-            self.config.base['trunk_branch'])
-        return self._get_tracking_branch_data(trunk_branch.tracking_branch())
-
-    @property
-    def remote_name(self) -> Union[str, bool]:
-        """Return active branch remote name from tracking branch.
-
-        If there is no tracking branch for active branch, it will
-        default to trunk tracking branch info.
-        """
-        data = self.active_tracking_branch_data
-        if not data:  # default to trunk branch remote if there is one
-            data = self.trunk_tracking_branch_data
-            if not data:
-                return False
-        return data.remote
-
-    def count_commits_behind_ahead(self, ref1, ref2) -> Tuple[int]:
-        """Compare two refs and return count of commits behind/ahead."""
-        compare = '%s..%s' % (ref1, ref2)
-        res = self.git.rev_list(compare, '--left-right', '--count', )
-        behind_ahead = res.split('\t')
-        behind = int(behind_ahead[0])
-        ahead = int(behind_ahead[1])
-        return behind, ahead
-
-    def count_commits_ahead_trunk(self) -> int:
-        """Count commits ahead trunk branch."""
-        behind, ahead = self.count_commits_behind_ahead(
-            self.config.base['trunk_branch'], self.active_branch_name)
-        return ahead
-
-    def count_commits_behind_trunk(self) -> int:
-        """Count commits behind trunk branch."""
-        behind, ahead = self.count_commits_behind_ahead(
-            self.config.base['trunk_branch'], self.active_branch_name)
-        return behind
-
-    @property
-    def max_squash_commits_count(self):
-        """Return maximum commits count that can be squashed."""
-        return self.count_commits_ahead_trunk() - 1
-
-    def git_diff(self, ref1, ref2, *args) -> str:
-        """Return difference between two refs."""
-        return self.git.diff('%s..%s' % (ref1, ref2), *args)
-
-    def git_checkout(self, branch_name: str) -> None:
-        """Checkout to specified branch."""
-        self.git.checkout(branch_name, _log_input=True, _log_output=True)
-
-    def git_push(self, remote_name: str, remote_head: str, *args) -> None:
-        """Push active branch to remote."""
-        self.git.push(*args, remote_name, remote_head, _log_input=True)
-
-    def git_delete_remote_branch(
-            self, remote_name: str, remote_head: str) -> None:
-        """Delete specified branch on remote."""
-        self.git.push(remote_name, '--delete', remote_head, _log_input=True)
-        # TODO: push does not give any output. How to get output for it?
-        self.logger.info(" - [deleted]         %s", remote_head)
-
-    def git_delete_local_branch(self, branch_name: str, force=False) -> None:
-        """Delete specified branch locally."""
-        d = '-D' if force else '-d'
-        self.git.branch(d, branch_name, _log_input=True, _log_output=True)
-
-    def pull_trunk_branch(self) -> None:
-        """Pull trunk branch locally."""
-        tracking_data = self.trunk_tracking_branch_data
-        if not tracking_data:
-            self.logger.notice(
-                "No tracking branch for %s branch to pull. Ignoring.",
-                self.config.base['trunk_branch'])
-            return False
-        self.git.pull(
-            '--rebase',
-            tracking_data.remote,
-            tracking_data.head,
-            _log_input=True,
-            _log_output=True
-        )
-        return True
-
-    def check_run(self, **kwargs) -> bool:
-        """Check if run method can be called.
-
-        Override to implement specific checks.
-        """
-        return True
-
-    @abc.abstractmethod
-    def run(self, **kwargs) -> None:
-        """Run action. Must be implemented."""
-        self.check_run(**kwargs)
-
-
-class GitTrunkInit(GitTrunkCommand):
+class GitTrunkInit(gt_base.GitTrunkCommand):
     """Class to handle trunk configuration initialization."""
 
     def _prepare_init_config(self, kwargs) -> dict:
@@ -605,7 +46,7 @@ class GitTrunkInit(GitTrunkCommand):
     def __init__(
         self,
         repo_path: Optional[str] = None,
-        log_level: str = DEFAULT_LOG_LEVEL,
+        log_level: str = gt_base.DEFAULT_LOG_LEVEL,
             **kwargs) -> None:
         """Override to include init options."""
         super().__init__(repo_path=repo_path, log_level=log_level)
@@ -631,16 +72,18 @@ class GitTrunkInit(GitTrunkCommand):
         self.config.write(self._init_cfg)
 
 
-class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
+class GitTrunkStart(
+        gt_base.GitTrunkCommand, gt_base.GitTrunkReleaseHelperMixin):
     """Class to create branch like feature or release."""
 
-    section = START_SECTION
+    section = gt_config.START_SECTION
 
     def check_run(self, **kwargs):
         """Override to check if start can be run."""
         res = super().check_run(**kwargs)
         trunk_branch_name = self.config.base['trunk_branch']
-        active_branch_name = self.active_branch_name
+        # Expecting active ref to be branch.
+        active_branch_name = self.active_ref_name
         if active_branch_name != trunk_branch_name:
             raise ValueError(
                 "To create new branch, you must be on trunk branch '%s'."
@@ -650,7 +93,7 @@ class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
 
     def _get_fetch_branches_pattern(self):
         pattern = self.config.section['fetch_branch_pattern']
-        return pattern or DEFAULT_FETCH_PATTERN
+        return pattern or gt_config.DEFAULT_FETCH_PATTERN
 
     def _fetch_branches(self):
         remote = self.remote_name
@@ -662,7 +105,7 @@ class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
             _log_input=True,
             _log_output=True)
 
-    def _get_branch_head_filters(self, pattern: Optional[str] = None) -> tuple:
+    def _get_branch_head_filters(self, pattern: Optional[str] = None) -> list:
         def not_tracked_head_filter(head: str):
             return head not in tracked_heads
 
@@ -679,7 +122,7 @@ class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
         if self.remote_name:
             self._fetch_branches()
         filters = self._get_branch_head_filters(pattern=pattern)
-        heads = multi_filter(filters, self.remote_branch_heads)
+        heads = gt_base.multi_filter(filters, self.remote_branch_heads)
         msg = "Can't find branch name to create locally."
         try:
             remote_head = natsort.natsorted(heads)[0]
@@ -691,14 +134,14 @@ class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
         try:
             self.git.checkout('-b', name, _log_input=True, _log_output=True)
         except git.exc.GitCommandError as e:
-            raise ValueError(_format_stderr(e.stderr))
+            raise ValueError(gt_base._format_stderr(e.stderr))
         if set_upstream:
             if not self.remote_name:
                 self.logger.warning(
                     "Missing remote to set upstream for '%s' branch. "
                     "Ignoring.", name)
             # -u is shortcut to set upstream.
-            self.git_push(self.remote_name, name, '-u')
+            self.git_push(self.remote_name, name, '-u')  # type: ignore
 
     def run(
         self,
@@ -725,17 +168,18 @@ class GitTrunkStart(GitTrunkCommand, GitTrunkReleaseHelperMixin):
         super().run(name=name, **kwargs)
         # Updating trunk so new branch created from it is up to date.
         trunk_refresh = GitTrunkRefresh(
-            repo_path=self.repo.git_dir, log_level=self.logger.level)
+            repo_path=self.repo.working_dir, log_level=self.logger.level)
         trunk_refresh.run()
         if not name:
             name = self._find_branch_name(pattern=pattern)
-        self._create_branch(name, set_upstream=set_upstream)
+        self._create_branch(name, set_upstream=set_upstream)  # type: ignore
 
 
-class GitTrunkFinish(GitTrunkCommand, GitTrunkReleaseHelperMixin):
+class GitTrunkFinish(
+        gt_base.GitTrunkCommand, gt_base.GitTrunkReleaseHelperMixin):
     """Class to finish active branch on trunk branch."""
 
-    section = FINISH_SECTION
+    section = gt_config.FINISH_SECTION
 
     def _get_ff_flag(self, ff) -> str:
         if ff:
@@ -854,10 +298,10 @@ class GitTrunkFinish(GitTrunkCommand, GitTrunkReleaseHelperMixin):
             active_branch_name, force=force_delete)
 
 
-class GitTrunkRelease(GitTrunkCommand):
+class GitTrunkRelease(gt_base.GitTrunkCommand):
     """Class to release new tag on trunk branch."""
 
-    section = RELEASE_SECTION
+    section = gt_config.RELEASE_SECTION
 
     def _get_default_tag_message(self, new_tag, ref, latest_tag=None):
         # If he have latest tag, we only add difference between latest
@@ -918,7 +362,7 @@ class GitTrunkRelease(GitTrunkCommand):
         return self._version_manager
 
     def _fetch_tags(self):
-        p = DEFAULT_FETCH_PATTERN
+        p = gt_config.DEFAULT_FETCH_PATTERN
         self.git.fetch(
             self.remote_name,
             'refs/tags/{p}:refs/tags/{p}'.format(p=p),
@@ -961,7 +405,7 @@ class GitTrunkRelease(GitTrunkCommand):
         self.logger.notice('git tag %s', ' '.join(args))
         # Using subprocess, to make sure editor is opened correctly.
         with chdir_tmp(self.repo.working_dir):
-            _git_cmd(['tag'] + args + ['-m', msg])
+            gt_base._git_cmd(['tag'] + args + ['-m', msg])
 
     def _push_tags(self):
         self.git.push('--tags', self.remote_name, _log_input=True)
@@ -1014,11 +458,11 @@ class GitTrunkRelease(GitTrunkCommand):
             **kwargs
         )
         version = self.version_manager.get_version(version, part=part)
-        self._create_tag(version, ref)
+        self._create_tag(version, ref)  # type: ignore
         self.commands_invoker.run()
 
 
-class GitTrunkRefresh(GitTrunkCommand):
+class GitTrunkRefresh(gt_base.GitTrunkCommand):
     """Class to handle update trunk branch and rebase it on curr one."""
 
     def git_stash(self):
@@ -1074,10 +518,10 @@ class GitTrunkRefresh(GitTrunkCommand):
         self.commands_invoker.run(priority='lifo')
 
 
-class GitTrunkSquash(GitTrunkCommand):
+class GitTrunkSquash(gt_base.GitTrunkCommand):
     """Class to allow squashing active branch N commits."""
 
-    section = SQUASH_SECTION
+    section = gt_config.SQUASH_SECTION
 
     @property
     def head_hash(self):
@@ -1165,20 +609,20 @@ class GitTrunkSquash(GitTrunkCommand):
         super().run(count=count, **kwargs)
         # Making sure active branch has all latest changes from trunk.
         trunk_refresh = GitTrunkRefresh(
-            repo_path=self.repo.git_dir, log_level=self.logger.level)
+            repo_path=self.repo.working_dir, log_level=self.logger.level)
         trunk_refresh.run()
         message = self._get_message_for_squash(
-            count,
+            count,  # type: ignore
             include_squash_msg=include_squash_msg,
             custom_msg=custom_msg
         )
-        self._squash(count)
+        self._squash(count)  # type: ignore
         self._amend_commit_for_squash(message=message)
         # To open commit message for editing.
         if self.config.section['edit_squash_message']:
             # Using subprocess to make sure editor is opened correctly.
             with chdir_tmp(self.repo.working_dir):
-                _git_cmd(['commit', '--amend'])
+                gt_base._git_cmd(['commit', '--amend'])
         if self.config.section['force_push_squash']:
             tracking_data = self.active_tracking_branch_data
             if tracking_data:

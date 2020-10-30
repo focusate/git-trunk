@@ -1,5 +1,5 @@
-from git_trunk.git_trunk import (
-    GitTrunkInit,
+from git_trunk.git_trunk_commands import GitTrunkInit
+from git_trunk.git_trunk_config import (
     BASE_SECTION,
     START_SECTION,
     FINISH_SECTION,
@@ -12,19 +12,44 @@ from . import common
 class TestGitTrunkInit(common.GitTrunkCommon):
     """Class to test git-trunk init command."""
 
-    def _test_init(self, trunk_init):
+    def _test_init(self, trunk_init, path_section=None):
         to_git_section = trunk_init.config._to_git_section
-        with trunk_init.repo.config_reader() as cr:
-            self.assertEqual(cr.get_value(
-                to_git_section(BASE_SECTION), 'trunkbranch'), 'master')
-            self.assertEqual(cr.get_value(
-                to_git_section(RELEASE_SECTION), 'versionprefix'), '')
-            self.assertEqual(cr.get_value(
-                to_git_section(RELEASE_SECTION), 'usesemver'), True)
-            self.assertEqual(cr.get_value(
-                to_git_section(RELEASE_SECTION), 'edittagmessage'), False)
-            self.assertEqual(cr.get_value(
-                to_git_section(SQUASH_SECTION), 'editsquashmessage'), False)
+        with trunk_init._config._config_reader() as cr:
+            self.assertEqual(
+                cr.get_value(
+                    to_git_section(BASE_SECTION, path=path_section),
+                    'trunkbranch'
+                ),
+                'master'
+            )
+            self.assertEqual(
+                cr.get_value(
+                    to_git_section(RELEASE_SECTION, path=path_section),
+                    'versionprefix'
+                ),
+                ''
+            )
+            self.assertEqual(
+                cr.get_value(
+                    to_git_section(RELEASE_SECTION, path=path_section),
+                    'usesemver'
+                ),
+                True
+            )
+            self.assertEqual(
+                cr.get_value(
+                    to_git_section(RELEASE_SECTION, path=path_section),
+                    'edittagmessage'
+                ),
+                False
+            )
+            self.assertEqual(
+                cr.get_value(
+                    to_git_section(SQUASH_SECTION, path=path_section),
+                    'editsquashmessage'
+                ),
+                False
+            )
 
     def test_01_git_init(self):
         """Initialize same trunkbranch, then new one.
@@ -49,6 +74,7 @@ class TestGitTrunkInit(common.GitTrunkCommon):
             log_level=common.LOG_LEVEL)
         trunk_init.run()
         self._test_init(trunk_init)
+        return trunk_init  # For override
 
     def test_02_get_config(self):
         """Get config options.
@@ -114,3 +140,18 @@ class TestGitTrunkInit(common.GitTrunkCommon):
         self.git.branch('--unset-upstream')
         self.git.checkout('branch1')
         self.assertEqual(trunk_init.remote_name, False)
+
+
+class TestGitTrunkInitSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkInit):
+    """Class to test git-trunk init command on submodule."""
+
+    def _test_init(self, trunk_init, path_section=None):
+        path_section = common.PATH_SUBMODULE
+        super()._test_init(trunk_init, path_section=path_section)
+
+    def test_01_git_init(self):
+        """Check if submodule path is passed as section path."""
+        trunk_init = super().test_01_git_init()
+        self.assertEqual(
+            trunk_init._config.path_section, common.PATH_SUBMODULE)

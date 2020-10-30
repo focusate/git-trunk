@@ -1,4 +1,5 @@
-from git_trunk.git_trunk import GitTrunkSquash
+from git_trunk.git_trunk_commands import GitTrunkSquash
+
 from . import common
 
 
@@ -142,3 +143,8 @@ class TestGitTrunkSquash(common.GitTrunkCommon):
             log_msg=custom_msg,
             behind_ahead_remote=(0, 1)  # squash not pushed yet.
         )
+
+
+class TestGitTrunkSquashSubmodule(
+        common.GitTrunkSubmoduleCommon, TestGitTrunkSquash):
+    """Class to test git-trunk squash command."""
