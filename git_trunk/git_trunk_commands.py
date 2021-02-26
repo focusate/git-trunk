@@ -5,11 +5,11 @@ from typing import Optional, Union
 import natsort
 from footil.path import chdir_tmp
 from footil.patterns import MethodCommand
+from footil import version as version_manager
 import git  # GitPython
 
 from . import git_trunk_base as gt_base
 from . import git_trunk_config as gt_config
-from . import version as version_manager
 
 EMPTY_VERSION = '0.0.0'  # default version when are no versions yet
 
@@ -269,8 +269,9 @@ class GitTrunkFinish(
                         method=self.git_push,
                         args=(
                             trunk_tracking_data.remote,
-                            trunk_tracking_data.head)
+                            trunk_tracking_data.head,
                         )
+                    )
                 ]
             )
         if active_tracking_data:
@@ -282,8 +283,9 @@ class GitTrunkFinish(
                         method=self.git_delete_remote_branch,
                         args=(
                             active_tracking_data.remote,
-                            active_tracking_data.head)
+                            active_tracking_data.head,
                         )
+                    )
                 ]
             )
         force_delete = False
@@ -549,7 +551,7 @@ class GitTrunkSquash(gt_base.GitTrunkCommand):
         return None
 
     def _amend_commit_for_squash(
-            self, message: Union[None, str] = None):
+            self, message: Union[None, str]=None):
         args = ['--amend']
         if message:
             args.extend(['-m', message])

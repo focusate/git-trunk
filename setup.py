@@ -9,7 +9,7 @@ setup(
     url='https://github.com/focusate/git-trunk',
     description="Git Trunk based workflow",
     long_description=open('README.rst').read(),
-    install_requires=['footil>=0.19.0', 'gitpython', 'semver', 'natsort'],
+    install_requires=['footil>=0.24.0', 'gitpython'],
     scripts=['bin/git-trunk'],
     maintainer='Andrius Laukavičius',
     maintainer_email='dev@focusate.eu',
