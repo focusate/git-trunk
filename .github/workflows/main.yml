@@ -1,0 +1,76 @@
+---
+name: Test & Deploy
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - "master"
+    tags:
+      - "*.*.*"
+  pull_request:
+
+jobs:
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install tox
+        run: pip install tox
+      - name: Run lint
+        run: tox -e lint
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: [3.7, 3.8, 3.9, "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        run: |
+          pip install -U pip
+          pip install -U setuptools
+          sudo apt update
+          sudo apt install -y build-essential libpq-dev python-dev-is-python3
+      - name: Install tox
+        run: pip install tox
+      - name: Allow git to submodule filesystem and set identity
+        run: |
+          git config --global protocol.file.allow always
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+      - name: Run tox
+        # Run tox using the version of Python in `PATH`
+        run: tox -e py
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: startsWith(github.ref, 'refs/tags')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install -U pip
+          pip install -U wheel setuptools
+      - name: Build package
+        run: python setup.py sdist bdist_wheel
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

@@ -118,7 +118,17 @@ By default squash message generated is to concatenate all commit messages (inclu
 
 By default squash message edit is enabled, which allows to edit tag message before it is saved. Can be disabled if needed.
 
-|
+Testing
+=======
+
+To test with newer ``git``, adding submodules from files must be enabled:
+
+.. code-block::
+
+    git config --global protocol.file.allow always
+
+This is used as a workaround, because setting this on temp tested repo does not work
+for some reason.
 
 *Contributors*
 
