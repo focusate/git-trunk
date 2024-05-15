@@ -551,7 +551,7 @@ class GitTrunkSquash(gt_base.GitTrunkCommand):
         return None
 
     def _amend_commit_for_squash(
-            self, message: Union[None, str]=None):
+            self, message: Union[None, str] = None):
         args = ['--amend']
         if message:
             args.extend(['-m', message])
@@ -566,11 +566,11 @@ class GitTrunkSquash(gt_base.GitTrunkCommand):
         if trunk_branch_name == self.active_branch_name:
             raise ValueError(
                 "Branch to be squashed must be different than trunk "
-                "branch: %s" % trunk_branch_name)
+                + "branch: %s" % trunk_branch_name)
         if self.git.diff('--stat'):
             raise ValueError(
                 "There are uncommitted changes. To squash, first stash"
-                " changes or commit them.")
+                + " changes or commit them.")
         max_count = self.max_squash_commits_count
         if max_count <= 0:
             raise ValueError("No Commits to squash.")
@@ -605,6 +605,7 @@ class GitTrunkSquash(gt_base.GitTrunkCommand):
             - git reset --soft HEAD~COUNT
             - git commit --amend -m 'MSG' (message depends on options)
             - git push --force (if enabled in config)
+
         """
         if not count:
             count = self.max_squash_commits_count
