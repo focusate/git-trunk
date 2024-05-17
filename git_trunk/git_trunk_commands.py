@@ -1,5 +1,7 @@
 """Git Trunk based workflow helper commands."""
 import re
+import os
+import pathlib
 from collections import namedtuple
 from typing import Optional, Union
 import natsort
@@ -16,6 +18,10 @@ EMPTY_VERSION = '0.0.0'  # default version when are no versions yet
 MethodData = namedtuple('MethodData', 'method args kwargs')
 # Set defaults for args and kwargs.
 MethodData.__new__.__defaults__ = ((), {})
+
+
+def is_empty_dir(path: pathlib.Path) -> bool:
+    return not any(path.iterdir())
 
 
 class GitTrunkInit(gt_base.GitTrunkCommand):
@@ -223,8 +229,10 @@ class GitTrunkFinish(
             raise ValueError(
                 "%s branch has no changes to be finished"
                 " on %s." % (self.active_branch_name, trunk_branch_name))
-        if (self.config.section['require_squash'] and
-                self.max_squash_commits_count):
+        if (
+            self.config.section['require_squash']
+            and self.max_squash_commits_count
+        ):
             raise ValueError(
                 "%s branch must be squashed first before finishing" %
                 self.active_branch_name)
@@ -632,3 +640,67 @@ class GitTrunkSquash(gt_base.GitTrunkCommand):
                 self.git_push(
                     tracking_data.remote, tracking_data.head, '--force'
                 )
+
+
+class GitTrunkSubmoduleUpdate(gt_base.GitTrunkCommand):
+    """Command to update/init submodules."""
+
+    section = gt_config.SUBMODULE_UPDATE_SECTION
+
+    def run(self, cleanup=False, **kwargs):
+        """Update submodules.
+
+        Args:
+            cleanup: whether to do full submodules cleanup before update
+
+        These commands will be run:
+
+        """
+        super().run(**kwargs)
+        if cleanup:
+            self._cleanup_submodules()
+        self.git.submodule(
+            *self._prepare_cmd_args(**kwargs), _log_input=True, _log_output=True
+        )
+
+    def _prepare_cmd_args(self, **kwargs):
+        args = self._prepare_base_args(**kwargs)
+        section = self.config.section
+        depth = section['depth']
+        if depth:
+            args.append(f'--depth={depth}')
+        if section['single_branch']:
+            args.append('--single-branch')
+        path_spec = section['path_spec']
+        if path_spec:
+            args.extend(path_spec.split(' '))
+        return args
+
+    def _prepare_base_args(self, **kwargs):
+        return ['update', '--init']
+
+    def _cleanup_submodules(self):
+        paths = self._get_gitmodule_paths()
+        non_empty_paths = [str(p) for p in paths if p.is_dir() and not is_empty_dir(p)]
+        # NOTE. If submodules were moved around, some data might not be picked up
+        # by deinit, so manual clean up could be needed.
+        if non_empty_paths:
+            self.git.submodule(
+                'deinit', '-f', *non_empty_paths, _log_input=True, _log_output=True
+            )
+        git_modules_content = '.git/modules/*'
+        os.system(f'rm -rf {git_modules_content}')
+        print(git_modules_content, "content removed")
+
+    def _get_gitmodule_paths(self) -> list[pathlib.Path]:
+        cfg_path = pathlib.Path(self.git.working_dir) / '.gitmodules'
+        if not cfg_path.is_file():
+            raise ValueError(f"No .gitmodule found in {self.git.working_dir}")
+        cfg = git.GitConfigParser(file_or_files=cfg_path)
+        paths = []
+        for section in cfg.sections():
+            items = cfg.items(section)
+            # Assuming path exists
+            path = [x[1] for x in items if x[0] == 'path'][0]
+            paths.append(pathlib.Path(path))
+        return paths

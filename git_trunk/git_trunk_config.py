@@ -14,6 +14,7 @@ START_SECTION = 'start'
 FINISH_SECTION = 'finish'
 RELEASE_SECTION = 'release'
 SQUASH_SECTION = 'squash'
+SUBMODULE_UPDATE_SECTION = 'submodule-update'
 SECTION_PATTERN = '{section} {sep}%s{sep}'.format(
     section=BASE_SECTION, sep=SEP)
 
@@ -142,6 +143,27 @@ class GitTrunkConfig:
                         "Whether to force push to remote tracking branch"
                         " after squashing."
                     )
+                ),
+            },
+            SUBMODULE_UPDATE_SECTION: {
+                'pathspec': cls.get_option_vals(
+                    'path_spec',
+                    default='',
+                    forced_type=str,
+                    description="Path spec to update specific submodules. If"
+                    + " left empty, updates all."
+                ),
+                'depth': cls.get_option_vals(
+                    'depth',
+                    default=0,
+                    forced_type=int,
+                    description="How many latest commits to fetch. "
+                    + "0 means, all commits"
+                ),
+                'singlebranch': cls.get_option_vals(
+                    'single_branch',
+                    default=False,
+                    description="Whether to fetch only HEAD (default) branch"
                 ),
             }
         }
