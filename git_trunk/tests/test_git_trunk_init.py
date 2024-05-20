@@ -5,6 +5,7 @@ from git_trunk.git_trunk_config import (
     FINISH_SECTION,
     RELEASE_SECTION,
     SQUASH_SECTION,
+    SUBMODULE_UPDATE_SECTION,
 )
 from . import common
 
@@ -83,6 +84,7 @@ class TestGitTrunkInit(common.GitTrunkCommon):
         """
         self.git_trunk_init._init_cfg[BASE_SECTION]['trunkbranch'] = '12.0'
         self.git_trunk_init._init_cfg[RELEASE_SECTION]['versionprefix'] = '1'
+        self.git_trunk_init._init_cfg[SUBMODULE_UPDATE_SECTION]['pathspec'] = 'abc'
         self.git_trunk_init.run()
         trunk_init = GitTrunkInit(
             repo_path=self.dir_local.name, log_level=common.LOG_LEVEL)
@@ -110,7 +112,12 @@ class TestGitTrunkInit(common.GitTrunkCommon):
                 SQUASH_SECTION: {
                     'edit_squash_message': False,
                     'force_push_squash': True
-                }
+                },
+                SUBMODULE_UPDATE_SECTION: {
+                    'path_spec': 'abc',
+                    'depth': 0,
+                    'single_branch': False,
+                },
             }
         )
 

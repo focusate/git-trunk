@@ -20,11 +20,10 @@ setup(
     scripts=['bin/git-trunk'],
     maintainer='Andrius Laukavičius',
     maintainer_email='andrius@timefordev.com',
-    python_requires='>=3.5',
+    python_requires='>=3.8',
     classifiers=[
         'Environment :: Other Environment',
         'Intended Audience :: Developers',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',

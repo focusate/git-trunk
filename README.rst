@@ -1,5 +1,6 @@
-.. image:: https://travis-ci.com/focusate/git-trunk.svg?branch=master
-    :target: https://travis-ci.com/focusate/git-trunk
+.. image:: https://github.com/focusate/git-trunk/actions/workflows/main.yml/badge.svg
+    :target: https://github.com/focusate/git-trunk/actions/workflows/main.yml
+    :alt: Test & Deploy
 
 Git Trunk based workflow
 ########################
@@ -16,8 +17,9 @@ Possible commands:
 * :code:`release`: create tag with new release version.
 * :code:`refresh`: update trunk branch and rebase it on active branch.
 * :code:`squash`: squash commits on active branch.
+* :code:`submodule-update`: update submodules.
 
-Code was tested using :code:`git version 2.25.1`.
+Code was tested using :code:`git version 2.43.2`.
 
 Source code in:
 
@@ -117,6 +119,25 @@ By default it tries to squash all ahead trunk commits into first one. It is poss
 By default squash message generated is to concatenate all commit messages (including commit other commits are being squashed into). It is also possible to specify custom commit message, which replaces default message. It is also possible to not specify any message (but then edit mode must be enabled to enter one manually).
 
 By default squash message edit is enabled, which allows to edit tag message before it is saved. Can be disabled if needed.
+
+submodule-update
+----------------
+
+``submodule-update`` command is used to run submodule updates.
+
+It is possible to manage these options via configuration:
+
+* ``pathspec``: paths for which submodules to do updates. If left empty, will update all.
+* ``depth``: how many commits to fetch. If its 0, then it will fetch all history normally.
+* ``single-branch``: whether to fetch single default branch.
+
+There is also ``--cleanup`` argument when initiating command (not able to set via
+ configuration). With this option you can do full cleanup of existing local submodules.
+Do note that all local changes (that are not saved on remote) will be deleted.
+
+Also if submodules have have been moved around, automatic cleanup might fail. So you
+might need to do manual cleanup, deleting all submodules where it is currently located
+and then ``.git/modules/`` content as well.
 
 Testing
 =======

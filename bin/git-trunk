@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 import abc
 import argparse
 from distutils.util import strtobool
@@ -12,6 +13,7 @@ from git_trunk.git_trunk_commands import (
     GitTrunkRelease,
     GitTrunkRefresh,
     GitTrunkSquash,
+    GitTrunkSubmoduleUpdate,
 )
 from git_trunk import __version__
 
@@ -107,6 +109,10 @@ class ArgAdderStr(BaseArgAdder):
         )
 
 
+class ArgAdderInt(ArgAdderStr):
+    pass
+
+
 class ArgAdderBool(BaseArgAdder):
     """Class to add bool type argument on parser."""
 
@@ -192,10 +198,12 @@ class SubparserTrunkInit(BaseSubparserTrunk):
     git_trunk_class = GitTrunkInit
     arg_adders_map = {
         str: ArgAdderStr,
+        int: ArgAdderInt,
         bool: ArgAdderBool,
     }
     convert_func_map = {
         str: None,
+        int: int,
         bool: strtorealbool,
     }
     config_struct = GitTrunkConfig.get_config_struct()
@@ -254,6 +262,7 @@ class SubparserTrunkInit(BaseSubparserTrunk):
 
         init_cfg = trunk_init._init_cfg
         for section, section_struct in self.config_struct.items():
+            print("Sub-command:", section)
             for option, option_vals in section_struct.items():
                 option_type = self._get_option_type(option_vals)
                 convert_func = self.convert_func_map[option_type]
@@ -262,6 +271,7 @@ class SubparserTrunkInit(BaseSubparserTrunk):
                     option_vals['label'],
                     section,
                     convert_func=convert_func)
+            print()
 
     def init_trunk_class(self, init_kwargs, args):
         """Override to implement input confirmation."""
@@ -400,6 +410,33 @@ class SubparserTrunkSquash(BaseSubparserTrunk):
         return init_kwargs, run_kwargs
 
 
+class SubparserTrunkSubmoduleUpdate(BaseSubparserTrunk):
+    """Submodule update command subparser."""
+
+    git_trunk_class = GitTrunkSubmoduleUpdate
+
+    def __init__(self, subparsers: argparse._SubParsersAction):
+        """Initialize submodule-update subparser."""
+        super().__init__(subparsers)
+        self.parser.add_argument(
+            '--cleanup',
+            action='store_true',
+            help="whether to do full submodules cleanup before update")
+
+    def prepare_args(self, args):
+        """Override to prepare GitTrunkSubmoduleUpdate specific args."""
+        init_kwargs, run_kwargs = super().prepare_args(args)
+        if args.cleanup:
+            answer = input(
+                "--cleanup option will remove all submodules locally. Are you sure you"
+                + " want to do it? y/n\n"
+            )
+            if not strtorealbool(answer):
+                sys.exit(0)
+        run_kwargs.update({'cleanup': args.cleanup})
+        return init_kwargs, run_kwargs
+
+
 def main():
     """Run specified git-trunk command."""
 
@@ -416,6 +453,7 @@ def main():
     SubparserTrunkRelease(subparsers)
     SubparserTrunkRefresh(subparsers)
     SubparserTrunkSquash(subparsers)
+    SubparserTrunkSubmoduleUpdate(subparsers)
     args = parser.parse_args()
     dest_subparser = _subparsers_map[args.command]
     dest_subparser.execute(args)
