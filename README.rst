@@ -133,6 +133,7 @@ It is possible to manage these options via configuration:
 
 There is also ``--cleanup`` argument when initiating command (not able to set via
  configuration). With this option you can do full cleanup of existing local submodules.
+
 Do note that all local changes (that are not saved on remote) will be deleted.
 
 Also if submodules have have been moved around, automatic cleanup might fail. So you
